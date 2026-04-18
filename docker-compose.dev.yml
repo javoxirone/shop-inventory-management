@@ -1,0 +1,98 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: shop-inventory-db-dev
+    environment:
+      POSTGRES_DB: inventory_dev
+      POSTGRES_USER: inventory_user
+      POSTGRES_PASSWORD: inventory_pass
+    ports:
+      - "5432:5432"
+    volumes:
+      - shop_inventory_dev_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U inventory_user -d inventory_dev"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: shop-inventory-migrate-dev
+    command: alembic upgrade head
+    environment:
+      DATABASE_URL: postgresql+psycopg://inventory_user:inventory_pass@db:5432/inventory_dev
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./:/app
+    restart: "no"
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: shop-inventory-api-dev
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    environment:
+      DATABASE_URL: postgresql+psycopg://inventory_user:inventory_pass@db:5432/inventory_dev
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    volumes:
+      - ./:/app
+
+  pgadmin:
+    image: dpage/pgadmin4:8
+    container_name: shop-inventory-pgadmin-dev
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@example.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "5050:80"
+    volumes:
+      - shop_inventory_dev_pgadmin_data:/var/lib/pgadmin
+
+  test:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: shop-inventory-test-dev
+    command: pytest -q
+    environment:
+      DATABASE_URL: postgresql+psycopg://inventory_user:inventory_pass@db:5432/inventory_dev
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    volumes:
+      - ./:/app
+    profiles: ["tools"]
+    restart: "no"
+
+  lint:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: shop-inventory-lint-dev
+    command: ruff check .
+    volumes:
+      - ./:/app
+    profiles: ["tools"]
+    restart: "no"
+
+volumes:
+  shop_inventory_dev_db_data:
+  shop_inventory_dev_pgadmin_data:
